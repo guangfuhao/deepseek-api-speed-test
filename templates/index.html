@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Deepseek 服务商响应速度对比</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .table th { 
+            text-align: center;
+        }
+        .table td {
+            text-align: center;
+        }
+        .provider-selector {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+        .provider-selector .form-check {
+            margin-right: 15px;
+            display: inline-block;
+        }
+        /* 添加新的样式 */
+        .sidebar {
+            height: 100vh;
+            border-right: 1px solid #dee2e6;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .history-item {
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .history-item:hover {
+            background-color: #f8f9fa;
+        }
+        .history-item.active {
+            background-color: #e9ecef;
+        }
+        .main-content {
+            height: 100vh;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .history-time {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        .history-provider {
+            font-weight: bold;
+        }
+        #logArea pre {
+            max-height: 200px;  /* 减小最大高度 */
+            overflow-y: auto;   /* 垂直方向可滚动 */
+            overflow-x: hidden; /* 禁止水平滚动 */
+            white-space: pre-wrap; /* 允许文本自动换行 */
+            word-wrap: break-word; /* 确保长单词也会换行 */
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 0.9em;  /* 稍微减小字体大小 */
+            line-height: 1.4;  /* 适当的行高 */
+        }
+        .delete-btn {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .history-item:hover .delete-btn {
+            opacity: 1;
+        }
+        
+        .delete-btn:hover {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 左侧历史记录栏 -->
+            <div class="col-3 sidebar">
+                <h4 class="mb-3">历史测试记录</h4>
+                <div id="historyList">
+                    <!-- 历史记录将通过 JavaScript 动态添加 -->
+                </div>
+            </div>
+
+            <!-- 主要内容区域 -->
+            <div class="col-9 main-content">
+                <h2 class="text-center mb-4">DeepSeek 服务商响应速度对比</h2>
+                
+                <!-- 服务商选择区域 -->
+                <div class="provider-selector text-center">
+                    <div class="mb-2">
+                        <button id="selectAll" class="btn btn-outline-primary btn-sm me-2">全选</button>
+                        <button id="deselectAll" class="btn btn-outline-secondary btn-sm">取消全选</button>
+                    </div>
+                    <div id="providerCheckboxes">
+                        <!-- 这里将通过 JavaScript 动态添加复选框 -->
+                    </div>
+                </div>
+                
+                <div class="text-center mb-3">
+                    <button id="runTest" class="btn btn-primary">开始测试</button>
+                </div>
+                
+                <div id="logArea" class="mb-3 d-none">
+                    <pre></pre>
+                </div>
+
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>服务商</th>
+                            <th>首token响应(秒)</th>
+                            <th>推理速度(t/s)</th>
+                            <th>生成速度(t/s)</th>
+                            <th>平均速度(t/s)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                    </tbody>
+                </table>
+
+                <!-- 添加注释说明 -->
+                <div class="mt-4 small text-muted">
+                    <p class="mb-1">注：</p>
+                    <ul class="list-unstyled ps-3">
+                        <li>• 推理速度：推理阶段的token生成速度</li>
+                        <li>• 生成速度：内容生成阶段的token生成速度</li>
+                        <li>• 平均速度：整体平均速度，计算包含了首token响应等待时间</li>
+                        <li>• t/s 表示 tokens/second (每秒生成的token数)</li>
+                    </ul>
+                </div>
+
+                <div class="text-center mt-3">
+                    <small id="testTime" class="text-muted"></small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 加载服务商列表
+        async function loadProviders() {
+            const response = await fetch('/providers');
+            const providers = await response.json();
+            const container = document.getElementById('providerCheckboxes');
+            
+            for (const [key, provider] of Object.entries(providers)) {
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `
+                    <input class="form-check-input provider-checkbox" type="checkbox" 
+                           value="${provider.name}" id="${key}" 
+                           ${provider.enabled ? 'checked' : ''}>
+                    <label class="form-check-label" for="${key}">
+                        ${provider.name}
+                    </label>
+                `;
+                container.appendChild(div);
+            }
+        }
+
+        // 全选/取消全选功能
+        document.getElementById('selectAll').addEventListener('click', () => {
+            document.querySelectorAll('.provider-checkbox').forEach(cb => cb.checked = true);
+        });
+        
+        document.getElementById('deselectAll').addEventListener('click', () => {
+            document.querySelectorAll('.provider-checkbox').forEach(cb => cb.checked = false);
+        });
+
+        // 运行测试
+        document.getElementById('runTest').addEventListener('click', async () => {
+            const selectedProviders = Array.from(document.querySelectorAll('.provider-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedProviders.length === 0) {
+                alert('请至少选择一个服务商');
+                return;
+            }
+            
+            document.getElementById('runTest').disabled = true;
+            document.getElementById('runTest').textContent = '测试中...';
+            
+            const logArea = document.getElementById('logArea');
+            const logPre = logArea.querySelector('pre');
+            const tbody = document.getElementById('resultsBody');
+            
+            logArea.classList.remove('d-none');
+            logPre.textContent = '';
+            tbody.innerHTML = '';
+            
+            try {
+                const queryString = selectedProviders.map(p => `providers[]=${encodeURIComponent(p)}`).join('&');
+                const eventSource = new EventSource(`/test?${queryString}`);
+                
+                // 用于存储所有结果的数组
+                const results = [];
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'log') {
+                        logPre.textContent += data.content;
+                        logPre.scrollTop = logPre.scrollHeight;
+                    } else if (data.type === 'result') {
+                        // 将结果添加到数组中
+                        results.push(data.data);
+                        
+                        // 对结果进行排序并重新显示
+                        tbody.innerHTML = results
+                            .sort((a, b) => (b.average_speed || 0) - (a.average_speed || 0))
+                            .map(result => `
+                                <tr>
+                                    <td>${result.provider}</td>
+                                    <td>${result.first_token_time || '-'}</td>
+                                    <td>${result.reasoning_speed || '-'}</td>
+                                    <td>${result.content_speed || '-'}</td>
+                                    <td>${result.average_speed || '-'}</td>
+                                </tr>
+                            `).join('');
+                    } else if (data.type === 'error') {
+                        logPre.textContent += `\n错误：${data.provider}: ${data.error}\n`;
+                        logPre.scrollTop = logPre.scrollHeight;
+                    }
+                };
+                
+                eventSource.onerror = function() {
+                    eventSource.close();
+                    document.getElementById('runTest').disabled = false;
+                    document.getElementById('runTest').textContent = '开始测试';
+                    loadHistory();
+                };
+            } catch (error) {
+                console.error('Error:', error);
+                logPre.textContent += `\n发生错误：${error}\n`;
+                document.getElementById('runTest').disabled = false;
+                document.getElementById('runTest').textContent = '开始测试';
+            }
+        });
+
+        // 修改历史记录加载函数
+        async function loadHistory() {
+            try {
+                const response = await fetch('/history');
+                const sessions = await response.json();
+                const historyList = document.getElementById('historyList');
+                
+                historyList.innerHTML = '';
+                sessions.forEach(session => {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    
+                    // 创建提供商列表字符串
+                    const providersList = session.records.map(r => r.provider).join(', ');
+                    
+                    div.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="history-time">${session.test_time}</div>
+                                <div class="history-providers small">${providersList}</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger delete-btn" 
+                                    data-id="${session.id}">
+                                <small>删除</small>
+                            </button>
+                        </div>
+                    `;
+                    
+                    // 点击历史记录项显示详细信息
+                    div.addEventListener('click', (e) => {
+                        if (e.target.closest('.delete-btn')) {
+                            return;
+                        }
+                        
+                        document.querySelectorAll('.history-item').forEach(item => {
+                            item.classList.remove('active');
+                        });
+                        div.classList.add('active');
+                        
+                        // 显示该会话中所有记录的详细信息
+                        const tbody = document.getElementById('resultsBody');
+                        tbody.innerHTML = session.records
+                            .sort((a, b) => (b.average_speed || 0) - (a.average_speed || 0))  // 按平均速度降序排序
+                            .map(record => `
+                                <tr>
+                                    <td>${record.provider}</td>
+                                    <td>${record.first_token_time || '-'}</td>
+                                    <td>${record.reasoning_speed || '-'}</td>
+                                    <td>${record.content_speed || '-'}</td>
+                                    <td>${record.average_speed || '-'}</td>
+                                </tr>
+                            `).join('');
+                        
+                        document.getElementById('testTime').textContent = `测试时间：${session.test_time}`;
+                    });
+                    
+                    // 添加删除按钮事件处理
+                    const deleteBtn = div.querySelector('.delete-btn');
+                    deleteBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (confirm('确定要删除这条记录吗？')) {
+                            try {
+                                const response = await fetch(`/history/${session.id}`, {
+                                    method: 'DELETE'
+                                });
+                                const result = await response.json();
+                                if (result.success) {
+                                    div.remove();
+                                    if (div.classList.contains('active')) {
+                                        document.getElementById('resultsBody').innerHTML = '';
+                                        document.getElementById('testTime').textContent = '';
+                                    }
+                                } else {
+                                    alert('删除失败');
+                                }
+                            } catch (error) {
+                                console.error('Error:', error);
+                                alert('删除失败');
+                            }
+                        }
+                    });
+                    
+                    historyList.appendChild(div);
+                });
+            } catch (error) {
+                console.error('Error:', error);
+                alert('获取历史记录失败');
+            }
+        }
+
+        // 修改页面加载完成后的处理
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProviders();
+            loadHistory();  // 自动加载历史记录
+        });
+    </script>
+</body>
+</html> 
